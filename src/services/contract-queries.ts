@@ -10,11 +10,21 @@ import {
   saveContract,
   updateContractOpenApi,
 } from './contract-service';
+import { releaseKeys } from './release-queries';
 
 export const contractKeys = {
   all: ['contracts'] as const,
   detail: (id: string) => ['contracts', id] as const,
 };
+
+/**
+ * 契约差异保存后会联动开放中的发布窗口（未放行门作废重算），
+ * 因此这些 mutation 同时失效发布窗口缓存。
+ */
+function invalidateContractAndReleases(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: contractKeys.all });
+  queryClient.invalidateQueries({ queryKey: releaseKeys.all });
+}
 
 export function useContracts() {
   return useQuery({
@@ -76,7 +86,7 @@ export function useUpdateOpenApi() {
   return useMutation({
     mutationFn: (input: { contractId: string; openapi: string }) =>
       updateContractOpenApi(input.contractId, input.openapi),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => invalidateContractAndReleases(queryClient),
   });
 }
 
@@ -84,7 +94,7 @@ export function useSaveContract() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: saveContract,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => invalidateContractAndReleases(queryClient),
   });
 }
 

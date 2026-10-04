@@ -6,6 +6,12 @@ import type {
   ReviewState,
 } from '../models/contract';
 import { stableChecksum, formatDateTime } from '../lib/utils';
+import { syncContractChange } from './release-service';
+import {
+  gateRows,
+  rollupWindow,
+  type ReleaseWindow,
+} from '../models/release';
 
 const STORAGE_KEY = 'pair-wise-gsb-70-contracts';
 const LATENCY = 180;
@@ -45,6 +51,8 @@ export async function saveContract(updated: ApiContract): Promise<ApiContract> {
     ? contracts.map((contract) => (contract.id === updated.id ? saved : contract))
     : [saved, ...contracts];
   persistContracts(next);
+  // 差异范围（OpenAPI 或差异条目）一旦改动，开放窗口中依赖它且未放行的调用方作废重算
+  await syncContractChange(saved.id, saved);
   await wait();
   return clone(saved);
 }
@@ -124,6 +132,7 @@ export async function updateContractOpenApi(
   }
   const updated = { ...contract, openapi, updatedAt: new Date().toISOString() };
   persistContracts(contracts.map((item) => (item.id === contractId ? updated : item)));
+  await syncContractChange(contractId, updated);
   await wait();
   return clone(updated);
 }
@@ -235,7 +244,13 @@ export function generateExampleRequest(contract: ApiContract, change?: ContractC
   );
 }
 
-export function buildChangeReport(contract: ApiContract): string {
+export function buildChangeReport(
+  contract: ApiContract,
+  windows: ReleaseWindow[] = [],
+): string {
+  const involvedWindows = windows.filter((window) =>
+    window.scopes.some((scope) => scope.contractId === contract.id),
+  );
   const lines = [
     `# ${contract.name} ${contract.version} 契约变更报告`,
     '',
@@ -261,6 +276,44 @@ export function buildChangeReport(contract: ApiContract): string {
       (consumer) =>
         `- ${consumer.name} / ${consumer.owner} / ${consumer.environment} / ${consumer.clientVersion}`,
     ),
+    '',
+    '## 发布窗口与分批放行',
+    ...(involvedWindows.length
+      ? involvedWindows.flatMap((window) => {
+          const rollup = rollupWindow(window, contract.id);
+          const scope = window.scopes.find((item) => item.contractId === contract.id);
+          const section = [
+            `### 窗口 ${window.name}（${window.status === 'open' ? '开窗中' : '已关窗'}，修订 ${window.revision}）`,
+            `- 开窗时间：${formatDateTime(window.openedAt)}`,
+            scope
+              ? `- 冻结差异：${scope.frozenSummary}（签名 ${scope.frozenSignature.slice(0, 8)}）`
+              : '- 冻结差异：缺失',
+            scope && scope.frozenSignature !== scope.currentSignature
+              ? `- 当前差异：${scope.currentSummary}（签名 ${scope.currentSignature.slice(0, 8)}），差异已变更，未放行调用方已作废重算；已放行调用方保留依据`
+              : '- 当前差异与开窗冻结一致',
+            `- 放行汇总：已放行 ${rollup.released}/${rollup.total}，待回执 ${rollup.pending}，待核 ${rollup.verifying}，作废 ${rollup.voided}，未获放行 ${rollup.conflict}`,
+          ];
+          gateRows(window, contract.id).forEach(({ gate }) => {
+            const stateText = {
+              pending: '待回执',
+              released: '已放行',
+              verifying: '待核',
+              voided: '已作废待重算',
+              conflict: '未获放行（其他窗口先到）',
+            }[gate.state];
+            let line = `- ${gate.consumerName}（${gate.clientVersionAtFreeze}）：${stateText}`;
+            if (gate.basis) {
+              line += `；放行依据 回执 ${gate.basis.receiptId} / ${gate.basis.revisionLabel} / 客户端 ${gate.basis.clientVersion} / 放行于 ${formatDateTime(gate.basis.releasedAt)}`;
+            }
+            if (gate.pendingReceipt) {
+              line += `；待核回执 ${gate.pendingReceipt.receiptId}（修订号 ${gate.pendingReceipt.windowRevision ?? '缺失'}，客户端 ${gate.pendingReceipt.clientVersion}）`;
+            }
+            section.push(line);
+          });
+          section.push('');
+          return section;
+        })
+      : ['- 该契约尚未加入任何发布窗口', '']),
     '',
     '## 豁免记录',
     ...(contract.exemptions.length

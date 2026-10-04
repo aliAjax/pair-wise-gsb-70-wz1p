@@ -30,6 +30,7 @@ import {
 } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Textarea } from '../components/ui/textarea';
+import { WindowPanel } from '../components/release/window-panel';
 import { formatDateTime } from '../lib/utils';
 import {
   REVIEW_STATE_LABELS,
@@ -51,6 +52,14 @@ import {
   useSaveContract,
   useUpdateOpenApi,
 } from '../services/contract-queries';
+import {
+  useCloseWindow,
+  useRecoverWindow,
+  useResetGate,
+  useSubmitReceipt,
+  useWindows,
+} from '../services/release-queries';
+import { gateRows, rollupWindow } from '../models/release';
 import { useReviewStore } from '../store/review-store';
 
 export function ContractDetailPage() {
@@ -67,6 +76,9 @@ export function ContractDetailPage() {
   const [releaseNotes, setReleaseNotes] = useState('');
   const [reviewFilter, setReviewFilter] = useState<ReviewState | 'all'>('all');
   const [selectedVersionId, setSelectedVersionId] = useState('');
+  const [selectedWindowId, setSelectedWindowId] = useState('');
+
+  const windowsForReport = useWindows();
 
   const contract = contractQuery.data;
   const issues = useMemo(
@@ -141,7 +153,7 @@ export function ContractDetailPage() {
   function exportReport() {
     downloadText(
       `${currentContract.id}-${currentContract.version}-change-report.md`,
-      buildChangeReport(currentContract),
+      buildChangeReport(currentContract, windowsForReport.data ?? []),
       'text/markdown;charset=utf-8',
     );
   }
@@ -200,6 +212,7 @@ export function ContractDetailPage() {
           <TabsTrigger value="overview">概览与契约</TabsTrigger>
           <TabsTrigger value="changes">差异评审</TabsTrigger>
           <TabsTrigger value="consumers">调用方</TabsTrigger>
+          <TabsTrigger value="rollout">分批放行</TabsTrigger>
           <TabsTrigger value="release">发布门禁</TabsTrigger>
           <TabsTrigger value="history">版本历史</TabsTrigger>
           <TabsTrigger value="report">变更报告</TabsTrigger>
@@ -325,6 +338,14 @@ export function ContractDetailPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="rollout">
+          <ContractRollout
+            contractId={contractId}
+            selectedWindowId={selectedWindowId}
+            onSelectWindow={setSelectedWindowId}
+          />
+        </TabsContent>
+
         <TabsContent value="release">
           <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
             <Card>
@@ -396,6 +417,8 @@ export function ContractDetailPage() {
               </CardContent>
             </Card>
           </div>
+
+          <RolloutSummaryCard contractId={contractId} />
         </TabsContent>
 
         <TabsContent value="history">
@@ -481,7 +504,7 @@ export function ContractDetailPage() {
               </CardHeader>
               <CardContent>
                 <pre className="max-h-[650px] overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
-                  {buildChangeReport(contract)}
+                  {buildChangeReport(contract, windowsForReport.data ?? [])}
                 </pre>
               </CardContent>
             </Card>
@@ -598,4 +621,130 @@ function downloadText(filename: string, content: string, type: string) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function ContractRollout({
+  contractId,
+  selectedWindowId,
+  onSelectWindow,
+}: {
+  contractId: string;
+  selectedWindowId: string;
+  onSelectWindow: (id: string) => void;
+}) {
+  const windowsQuery = useWindows();
+  const submitReceipt = useSubmitReceipt();
+  const resetGate = useResetGate();
+  const recoverWindow = useRecoverWindow();
+  const closeWindow = useCloseWindow();
+  const windows = (windowsQuery.data ?? []).filter((window) =>
+    window.scopes.some((scope) => scope.contractId === contractId),
+  );
+  const selected =
+    windows.find((window) => window.id === selectedWindowId) ??
+    windows.find((window) => window.status === 'open') ??
+    windows[0];
+
+  if (windowsQuery.isLoading) {
+    return <PageState text="正在加载发布窗口..." />;
+  }
+  if (!selected) {
+    return (
+      <Card>
+        <CardContent className="py-14 text-center text-sm text-slate-500">
+          该契约尚未加入任何发布窗口。
+          <Link to="/releases" className="ml-2 font-medium text-sky-800 hover:underline">
+            去发布页开新窗口
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={selected.id} onValueChange={onSelectWindow}>
+          <SelectTrigger className="w-[320px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {windows.map((window) => (
+              <SelectItem key={window.id} value={window.id}>
+                {window.name} · 修订 {window.revision} ·{' '}
+                {window.status === 'open' ? '开窗中' : '已关窗'}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Link to="/releases" className="text-xs font-medium text-sky-800 hover:underline">
+          发布页管理全部窗口
+        </Link>
+      </div>
+      <WindowPanel
+        window={selected}
+        contractId={contractId}
+        submitting={submitReceipt.isPending}
+        resetting={resetGate.isPending}
+        recovering={recoverWindow.isPending}
+        onSubmit={(input) => submitReceipt.mutate(input)}
+        onReset={(input) => resetGate.mutate(input)}
+        onRecover={() => recoverWindow.mutateAsync(selected.id)}
+        onClose={() => closeWindow.mutateAsync(selected.id)}
+      />
+    </div>
+  );
+}
+
+function RolloutSummaryCard({ contractId }: { contractId: string }) {
+  const windowsQuery = useWindows();
+  const windows = (windowsQuery.data ?? []).filter((window) =>
+    window.scopes.some((scope) => scope.contractId === contractId),
+  );
+  return (
+    <Card className="xl:col-span-2">
+      <CardHeader>
+        <CardTitle>该契约的窗口放行结果</CardTitle>
+        <p className="mt-1 text-xs text-slate-500">
+          与发布页、变更报告展示同一份窗口结果
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {windows.length ? (
+          windows.map((window) => {
+            const rollup = rollupWindow(window, contractId);
+            const voided = gateRows(window, contractId).filter(
+              (row) => row.gate.state === 'voided',
+            ).length;
+            return (
+              <div
+                key={window.id}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong>{window.name}</strong>
+                    <Badge tone={window.status === 'open' ? 'green' : 'slate'}>
+                      {window.status === 'open' ? '开窗中' : '已关窗'}
+                    </Badge>
+                    <Badge tone="blue">修订 {window.revision}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    已放行 {rollup.released}/{rollup.total} · 待核 {rollup.verifying} ·
+                    作废重算 {voided} · 未获放行 {rollup.conflict}
+                    {rollup.uncommitted > 0 && (
+                      <span className="text-amber-700"> · 未完成 {rollup.uncommitted}</span>
+                    )}
+                  </p>
+                </div>
+                <Progress className="w-40" value={rollup.progress} />
+              </div>
+            );
+          })
+        ) : (
+          <p className="text-sm text-slate-500">该契约尚未加入发布窗口。</p>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

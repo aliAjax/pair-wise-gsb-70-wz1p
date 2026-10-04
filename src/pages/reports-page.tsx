@@ -13,18 +13,31 @@ import {
 import { formatDateTime } from '../lib/utils';
 import { buildChangeReport } from '../services/contract-service';
 import { useContracts } from '../services/contract-queries';
+import { useWindows } from '../services/release-queries';
+import { gateRows, rollupWindow } from '../models/release';
 import { useReviewStore } from '../store/review-store';
 
 export function ReportsPage() {
   const contracts = useContracts();
+  const windows = useWindows();
   const selectedContractId = useReviewStore((state) => state.selectedContractId);
   const setSelectedContract = useReviewStore((state) => state.setSelectedContract);
   const contract =
     (contracts.data ?? []).find((item) => item.id === selectedContractId) ??
     contracts.data?.[0];
 
-  const report = useMemo(() => (contract ? buildChangeReport(contract) : ''), [contract]);
+  const windowList = windows.data ?? [];
+  const report = useMemo(
+    () => (contract ? buildChangeReport(contract, windowList) : ''),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [contract, windows.data],
+  );
   const reviewed = contract?.changes.filter((change) => change.reviewState !== 'pending') ?? [];
+  const contractWindows = contract
+    ? windowList.filter((window) =>
+        window.scopes.some((scope) => scope.contractId === contract.id),
+      )
+    : [];
 
   return (
     <div>
@@ -143,6 +156,69 @@ export function ReportsPage() {
                 {!contract.exemptions.length && (
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
                     当前没有兼容层豁免。
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>窗口放行结果</CardTitle>
+                <p className="mt-1 text-xs text-slate-500">
+                  与发布页、契约详情共用同一份窗口数据
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {contractWindows.length ? (
+                  contractWindows.map((window) => {
+                    const rollup = rollupWindow(window, contract!.id);
+                    const rows = gateRows(window, contract!.id);
+                    return (
+                      <article
+                        key={window.id}
+                        className="rounded-md border border-slate-200 p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <strong className="text-sm">{window.name}</strong>
+                          <div className="flex gap-1.5">
+                            <Badge tone={window.status === 'open' ? 'green' : 'slate'}>
+                              {window.status === 'open' ? '开窗中' : '已关窗'}
+                            </Badge>
+                            <Badge tone="blue">修订 {window.revision}</Badge>
+                          </div>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          已放行 {rollup.released}/{rollup.total} · 待核 {rollup.verifying} ·
+                          作废 {rollup.voided} · 未获放行 {rollup.conflict}
+                          {rollup.uncommitted > 0 && ` · 未完成 ${rollup.uncommitted}`}
+                        </p>
+                        <ul className="mt-2 space-y-1">
+                          {rows.map(({ gate }) => (
+                            <li
+                              key={gate.id}
+                              className="flex items-start justify-between gap-2 text-[11px] text-slate-600"
+                            >
+                              <span>{gate.consumerName}</span>
+                              <span className="text-right">
+                                {gate.state === 'released' && gate.basis
+                                  ? `已放行 · ${gate.basis.receiptId} · ${gate.basis.revisionLabel}`
+                                  : gate.state === 'verifying'
+                                    ? '待核'
+                                    : gate.state === 'voided'
+                                      ? '已作废待重算'
+                                      : gate.state === 'conflict'
+                                        ? '未获放行'
+                                        : '待回执'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </article>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-500">
+                    该契约尚未加入发布窗口。
                   </div>
                 )}
               </CardContent>
