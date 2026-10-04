@@ -12,7 +12,7 @@ import { cn } from '../../lib/utils';
 const navigation = [
   { to: '/', label: '契约工作台', icon: LayoutDashboard, exact: true },
   { to: '/review', label: '批量评审', icon: ClipboardCheck, exact: false },
-  { to: '/releases', label: '版本发布', icon: PackageCheck, exact: false },
+  { to: '/releases', label: '发布窗口', icon: PackageCheck, exact: false },
   { to: '/reports', label: '变更报告', icon: BookOpenCheck, exact: false },
 ] as const;
 
@@ -73,7 +73,7 @@ export function AppShell() {
               <strong className="text-sm">API 契约审查</strong>
             </div>
             <div className="hidden text-xs text-slate-500 lg:block">
-              正式版本发布前执行兼容性门禁、调用方影响确认与迁移方案检查
+              发布窗口冻结契约版本与差异范围，调用方凭验收回执分批放行
             </div>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />

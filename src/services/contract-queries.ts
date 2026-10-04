@@ -10,6 +10,7 @@ import {
   saveContract,
   updateContractOpenApi,
 } from './contract-service';
+import { windowKeys } from './window-queries';
 
 export const contractKeys = {
   all: ['contracts'] as const,
@@ -48,7 +49,10 @@ export function useReviewChange() {
         input.reviewer,
         input.comment,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }
 
@@ -67,7 +71,10 @@ export function useBulkReview() {
         input.reviewer,
         input.comment,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }
 
@@ -76,7 +83,10 @@ export function useUpdateOpenApi() {
   return useMutation({
     mutationFn: (input: { contractId: string; openapi: string }) =>
       updateContractOpenApi(input.contractId, input.openapi),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }
 
@@ -84,7 +94,10 @@ export function useSaveContract() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: saveContract,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }
 
@@ -93,7 +106,10 @@ export function useAddExemption() {
   return useMutation({
     mutationFn: (input: { contractId: string; changeId: string; reason: string }) =>
       addExemption(input.contractId, input.changeId, input.reason),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }
 
@@ -102,6 +118,9 @@ export function useFreezeVersion() {
   return useMutation({
     mutationFn: (input: { contractId: string; version: string; notes: string }) =>
       freezeVersion(input.contractId, input.version, input.notes),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: contractKeys.all }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contractKeys.all });
+      queryClient.invalidateQueries({ queryKey: windowKeys.all });
+    },
   });
 }

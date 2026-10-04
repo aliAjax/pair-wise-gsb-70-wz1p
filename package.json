@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:windows": "node --import jiti/register scripts/window-behavior.test.ts && node --import jiti/register scripts/window-service.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

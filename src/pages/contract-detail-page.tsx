@@ -16,6 +16,7 @@ import { ChangeReviewItem } from '../components/contract/change-review-item';
 import { CompatibilityBadge } from '../components/contract/compatibility-badge';
 import { ConsumerTable } from '../components/contract/consumer-table';
 import { ContractEditor } from '../components/contract/contract-editor';
+import { WindowPanel } from '../components/release/window-panel';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -43,6 +44,7 @@ import {
   diffVersionSummary,
   generateExampleRequest,
 } from '../services/contract-service';
+import { buildWindowReportSection } from '../services/window-service';
 import {
   useAddExemption,
   useContract,
@@ -51,11 +53,13 @@ import {
   useSaveContract,
   useUpdateOpenApi,
 } from '../services/contract-queries';
+import { useWindows } from '../services/window-queries';
 import { useReviewStore } from '../store/review-store';
 
 export function ContractDetailPage() {
   const { contractId } = useParams({ from: '/contracts/$contractId' });
   const contractQuery = useContract(contractId);
+  const windowsQuery = useWindows();
   const activeTab = useReviewStore((state) => state.activeTab);
   const setActiveTab = useReviewStore((state) => state.setActiveTab);
   const reviewChange = useReviewChange();
@@ -139,9 +143,12 @@ export function ContractDetailPage() {
   }
 
   function exportReport() {
+    const windowSection = windowsQuery.data
+      ? buildWindowReportSection(windowsQuery.data, currentContract.id)
+      : '';
     downloadText(
       `${currentContract.id}-${currentContract.version}-change-report.md`,
-      buildChangeReport(currentContract),
+      `${buildChangeReport(currentContract)}\n\n${windowSection}\n`,
       'text/markdown;charset=utf-8',
     );
   }
@@ -200,6 +207,7 @@ export function ContractDetailPage() {
           <TabsTrigger value="overview">概览与契约</TabsTrigger>
           <TabsTrigger value="changes">差异评审</TabsTrigger>
           <TabsTrigger value="consumers">调用方</TabsTrigger>
+          <TabsTrigger value="windows">放行窗口</TabsTrigger>
           <TabsTrigger value="release">发布门禁</TabsTrigger>
           <TabsTrigger value="history">版本历史</TabsTrigger>
           <TabsTrigger value="report">变更报告</TabsTrigger>
@@ -323,6 +331,43 @@ export function ContractDetailPage() {
               <ConsumerTable consumers={contract.consumers} />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="windows">
+          <div className="mb-4 flex items-center justify-between rounded-md border border-sky-200 bg-sky-50 px-4 py-3">
+            <p className="text-xs leading-5 text-sky-900">
+              本契约参与的发布窗口结果与发布页、报告页完全一致（同一份窗口快照）。开窗后在此修改差异，
+              窗口修订号递增，未放行调用方作废重算，已放行的保留依据。
+            </p>
+            <Link
+              to="/releases"
+              className="shrink-0 text-xs font-medium text-sky-800 hover:underline"
+            >
+              前往发布窗口
+            </Link>
+          </div>
+          <div className="space-y-4">
+            {(windowsQuery.data?.windows ?? [])
+              .filter((window) =>
+                window.frozenContracts.some((scope) => scope.contractId === contractId),
+              )
+              .map((window) => (
+                <WindowPanel
+                  key={window.id}
+                  window={window}
+                  contracts={[currentContract]}
+                />
+              ))}
+            {(windowsQuery.data?.windows ?? []).filter((window) =>
+              window.frozenContracts.some((scope) => scope.contractId === contractId),
+            ).length === 0 && (
+              <Card>
+                <CardContent className="py-14 text-center text-sm text-slate-500">
+                  本契约尚未加入任何发布窗口。
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="release">
@@ -482,6 +527,10 @@ export function ContractDetailPage() {
               <CardContent>
                 <pre className="max-h-[650px] overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
                   {buildChangeReport(contract)}
+                  {'\n\n'}
+                  {windowsQuery.data
+                    ? buildWindowReportSection(windowsQuery.data, contract.id)
+                    : ''}
                 </pre>
               </CardContent>
             </Card>

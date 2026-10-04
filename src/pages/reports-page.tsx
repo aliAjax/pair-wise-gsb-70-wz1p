@@ -1,5 +1,6 @@
-import { Download, FileJson, FileText, ShieldCheck } from 'lucide-react';
+import { AppWindow, Download, FileJson, FileText, ShieldCheck } from 'lucide-react';
 import { useMemo } from 'react';
+import { WindowPanel } from '../components/release/window-panel';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -12,19 +13,34 @@ import {
 } from '../components/ui/select';
 import { formatDateTime } from '../lib/utils';
 import { buildChangeReport } from '../services/contract-service';
+import { buildWindowReportSection } from '../services/window-service';
 import { useContracts } from '../services/contract-queries';
+import { useWindows } from '../services/window-queries';
 import { useReviewStore } from '../store/review-store';
 
 export function ReportsPage() {
   const contracts = useContracts();
+  const windowsQuery = useWindows();
   const selectedContractId = useReviewStore((state) => state.selectedContractId);
   const setSelectedContract = useReviewStore((state) => state.setSelectedContract);
   const contract =
     (contracts.data ?? []).find((item) => item.id === selectedContractId) ??
     contracts.data?.[0];
 
-  const report = useMemo(() => (contract ? buildChangeReport(contract) : ''), [contract]);
+  const windowSection = useMemo(
+    () => (windowsQuery.data && contract ? buildWindowReportSection(windowsQuery.data, contract.id) : ''),
+    [windowsQuery.data, contract],
+  );
+  const report = useMemo(
+    () => (contract ? `${buildChangeReport(contract)}\n\n${windowSection}\n` : ''),
+    [contract, windowSection],
+  );
   const reviewed = contract?.changes.filter((change) => change.reviewState !== 'pending') ?? [];
+  const relatedWindows = contract
+    ? (windowsQuery.data?.windows ?? []).filter((item) =>
+        item.frozenContracts.some((scope) => scope.contractId === contract.id),
+      )
+    : [];
 
   return (
     <div>
@@ -101,20 +117,50 @@ export function ReportsPage() {
 
       {contract ? (
         <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>报告预览</CardTitle>
-                <p className="mt-1 text-xs text-slate-500">Markdown 归档格式</p>
-              </div>
-              <FileText className="h-5 w-5 text-slate-400" />
-            </CardHeader>
-            <CardContent>
-              <pre className="max-h-[720px] overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
-                {report}
-              </pre>
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center gap-2">
+                <AppWindow className="h-4 w-4 text-sky-800" />
+                <div>
+                  <CardTitle>发布窗口放行结果</CardTitle>
+                  <p className="mt-1 text-xs text-slate-500">
+                    与发布页、契约详情显示同一份窗口快照
+                  </p>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 p-3">
+                {relatedWindows.length ? (
+                  relatedWindows.map((window) => (
+                    <WindowPanel
+                      key={window.id}
+                      window={window}
+                      contracts={contracts.data ?? []}
+                      closable={false}
+                    />
+                  ))
+                ) : (
+                  <p className="py-8 text-center text-sm text-slate-500">
+                    本契约尚未加入发布窗口。
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>报告预览</CardTitle>
+                  <p className="mt-1 text-xs text-slate-500">Markdown 归档格式</p>
+                </div>
+                <FileText className="h-5 w-5 text-slate-400" />
+              </CardHeader>
+              <CardContent>
+                <pre className="max-h-[720px] overflow-auto whitespace-pre-wrap rounded-md bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100">
+                  {report}
+                </pre>
+              </CardContent>
+            </Card>
+          </div>
 
           <div className="space-y-4">
             <Card>
